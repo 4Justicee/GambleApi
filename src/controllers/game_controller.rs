@@ -6,4 +6,5 @@ pub async fn get_users() -> HttpResponse {
         User { id: 1, name: String::from("Alice") },  
         User { id: 2, name: String::from("Bob") },  
     ])  
+    //HttpResponse::Ok().body("agent data")
 }  

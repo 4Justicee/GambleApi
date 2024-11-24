@@ -13,7 +13,7 @@ use crate::defines::game_launch::GameList;
 use crate::defines::game_launch::GetDateLog;  
 use crate::defines::game_launch::GetIdLog;  
 use crate::defines::game_launch::GetExchangeHistory;  
-
+use serde_json::json;  
 use sqlx::postgres::PgPoolOptions;  
 use sqlx::{PgPool, FromRow, Error as SqlxError};  
 
@@ -35,6 +35,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     let provider_code = body.provider_code.as_str();
     let agent_code = body.master_code.as_str();
     let user_code = body.player_code.as_str();
+    let player_balance = &body.player_balance;
 
     let agent_result = sqlx::query_as::<_, Agent>(  
         "SELECT * FROM agents WHERE agent_code = 1"  
@@ -71,7 +72,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
 
     let user_created = false;  
     let userBalance = 0;
-    let userApiType = 0;
+    let mut userApiType = 0;
 
     let user = match user_result {  
         Ok(Some(user)) => user,  
@@ -114,6 +115,29 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
         },  
         Err(e) => return Err(sqlx_error_to_actix_error(e)),  
     };  
+
+    if agent.api_type == 0 {  
+        if let Some(player_balance) = player_balance {  
+            if player_balance.is_nan() {  
+                return  Ok(HttpResponse::BadRequest().json(json!({"status": 0, "msg": "Seamless agent user balance required"})));  
+            }  
+            // Update user balance  
+            let result = sqlx::query("UPDATE users SET balance = $1, api_type = 0 WHERE user_code = $2")  
+                .bind(player_balance)  // Bind the first placeholder (\$1) to 'player_balance'  
+                .bind(user_code)       // Bind the second placeholder (\$2) to 'user_code'  
+                .execute(pool.as_ref())  
+                .await;  
+        
+            match result {  
+                Ok(_) => (),
+                Err(e) => return Err(sqlx_error_to_actix_error(e)), 
+            } 
+        } 
+        userApiType = 0;
+    }
+    else {
+
+    }
 
     Ok(HttpResponse::Ok().body("agent data"))
 } 
