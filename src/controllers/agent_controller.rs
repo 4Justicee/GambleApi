@@ -1,21 +1,23 @@
-use actix_web::{web, error, HttpResponse, http::StatusCode};  
+use actix_web::{web, error, HttpResponse};  
 use crate::models::agent::Agent; // Assuming Agent is a model in models/agent.rs  
 use crate::models::provider::Provider; // Assuming Agent is a model in models/agent.rs  
 use crate::models::user::User; // Assuming Agent is a model in models/agent.rs  
-use crate::defines::game_launch::GameLaunch;  
-use crate::defines::game_launch::UserCreate;  
-use crate::defines::game_launch::UserDeposit;  
-use crate::defines::game_launch::UserWithdraw;  
-use crate::defines::game_launch::UserWithdrawAll;  
-use crate::defines::game_launch::Info;  
-use crate::defines::game_launch::ProviderList;  
-use crate::defines::game_launch::GameList;  
-use crate::defines::game_launch::GetDateLog;  
-use crate::defines::game_launch::GetIdLog;  
-use crate::defines::game_launch::GetExchangeHistory;  
+use crate::defines::types::GameLaunch;  
+use crate::defines::types::UserCreate;  
+use crate::defines::types::UserDeposit;  
+use crate::defines::types::UserWithdraw;  
+use crate::defines::types::UserWithdrawAll;  
+use crate::defines::types::Info;  
+use crate::defines::types::ProviderList;  
+use crate::defines::types::GameList;  
+use crate::defines::types::GetDateLog;  
+use crate::defines::types::GetIdLog;  
+use crate::defines::types::GetExchangeHistory;  
+use crate::defines::types::RequestBody;  
+
 use serde_json::json;  
-use sqlx::postgres::PgPoolOptions;  
-use sqlx::{PgPool, FromRow, Error as SqlxError};  
+use sqlx::{PgPool};  
+use reqwest::Client;  
 
 use sqlx::query_as;
 
@@ -44,7 +46,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     .fetch_optional(pool.as_ref())  
     .await;  
 
-    let agent = match agent_result {  
+    let mut agent = match agent_result {  
         Ok(Some(agent)) => agent,  
         Ok(None) => return Ok(HttpResponse::NotFound().finish()),  
         Err(e) => return Err(sqlx_error_to_actix_error(e)),  
@@ -70,9 +72,9 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     .fetch_optional(pool.get_ref())  
     .await;  
 
-    let user_created = false;  
-    let userBalance = 0;
-    let mut userApiType = 0;
+    let mut user_created = false;  
+    let mut userBalance: f64 = 0.0;
+    let mut userApiType = 1;
 
     let user = match user_result {  
         Ok(Some(user)) => user,  
@@ -136,9 +138,138 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
         userApiType = 0;
     }
     else {
+        if let Some(amount) = body.deposit_amount {  
+            let agentPrevBalance = agent.balance;
+            let userPrevBalance = user.balance;
 
+            let mut tx = pool.begin().await.map_err(|e| {  
+                actix_web::error::ErrorInternalServerError(e)  
+            })?;  
+          
+
+            // Check if the agent has enough balance  
+            if agent.balance < amount {  
+                tx.rollback().await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;  
+                
+                return Ok(HttpResponse::BadRequest().body("Not enough balance"));  
+            }  
+
+            // Decrement the agent's balance  
+            agent.balance -= amount;  
+            sqlx::query("UPDATE agents SET balance = $1 WHERE agent_code = $2")  
+                .bind(agent.balance)  
+                .bind(&agent.agent_code)  
+                .execute(&mut tx).await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;  
+                
+            userBalance = userPrevBalance + amount;
+            
+            sqlx::query("INSERT INTO user_transactions (agent_code, user_code, charge_amount, agent_prev_balance, agent_after_balance, user_prev_balance, user_after_balance, charge_type, status, parent_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")  
+                .bind(&agent.agent_code) // agent_code  
+                .bind(&user.user_code) // user_code  
+                .bind(amount) // charge_amount  
+                .bind(agentPrevBalance) // agent_prev_balance  
+                .bind(agent.balance) // agent_after_balance  
+                .bind(userPrevBalance) // user_prev_balance  
+                .bind(userBalance) // user_after_balance  
+                .bind(1) // charge_type  
+                .bind(1) // status  
+                .bind(&user.parent_path) // parent_path  
+                .execute(&mut tx).await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;     
+            
+            sqlx::query("INSERT INTO user_balances (agent_code, user_code, user_prev_balance, user_after_balance, amount, target, cause, direction, comment, parent_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")  
+                .bind(&agent.agent_code)  
+                .bind(&user.user_code)  
+                .bind(user.balance) // User previous balance  
+                .bind(userBalance)  
+                .bind(amount)  
+                .bind(&agent.agent_code) // Target is the agent's code  
+                .bind("API | USER DEPOSIT") // Cause  
+                .bind("Increase") // Direction  
+                .bind("") // Comment  
+                .bind(&user.parent_path)  
+                .execute(&mut tx).await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;       
+            
+            sqlx::query("INSERT INTO agent_balance_progress (agent_code, agent_prev_balance, agent_after_balance, agent_prev_total_balance, agent_after_total_balance, currency, api_type, amount, target, cause, direction, comment, parent_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")  
+                .bind(&agent.agent_code)  
+                .bind(agent.balance) // Agent previous balance  
+                .bind(agent.balance)  
+                .bind(agent.total_balance) // previous total balance  
+                .bind(agent.total_balance) // after total balance, assuming no change  
+                .bind(&agent.currency)  
+                .bind(&agent.api_type)  
+                .bind(amount)  
+                .bind(&user.user_code) // Target is the user's code  
+                .bind("API | USER DEPOSIT") // Cause  
+                .bind("Decrease") // Direction  
+                .bind("") // Comment  
+                .bind(&agent.parent_path)  
+                .execute(&mut tx).await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;         
+            
+            sqlx::query("UPDATE users SET balance = $1, api_type = $2 WHERE user_code = $3")  
+                .bind(userBalance)  
+                .bind(userApiType)  
+                .bind(user_code)  
+                .execute(&mut tx)  
+                .await.map_err(|e| {  
+                    actix_web::error::ErrorInternalServerError(e)  
+                })?;           
+
+            // Commit transaction  
+            tx.commit().await.map_err(|e| {  
+                actix_web::error::ErrorInternalServerError(e)  
+            })?;  
+            
+            if !agent.site_end_point.trim().is_empty() { 
+                let client = Client::new();  
+                let url = format!("{}/callback_api/money_callback", agent.site_end_point.trim());  
+
+                let req_body = RequestBody {  
+                    agent_code: agent_code.to_string(),  
+                    agent_secret: agent.secret_key.to_string(),  
+                    agent_type: match agent.api_type {  
+                        1 => "Transfer".to_string(),  
+                        _ => "Seamless".to_string()
+                    },  
+                    user_code: user_code.to_string(),  
+                    provider_code: "".to_string(),  
+                    game_code: "".to_string(),  
+                    type_: "deposit".to_string(),  
+                    txn_id: "".to_string(),  
+                    agent_before_balance: agentPrevBalance,  
+                    agent_after_balance: agent.balance,  
+                    user_before_balance: userPrevBalance,  
+                    user_after_balance: userBalance,  
+                    amount,  
+                    msg: "Paying user money with the game launch API.".to_string(),  
+                }; 
+
+                let response = client.post(url)  
+                    .json(&req_body)  
+                    .send()  
+                    .await.map_err(|e| {  
+                        actix_web::error::ErrorInternalServerError(e)  
+                    })?;
+
+            } else {  
+                return Ok(HttpResponse::BadRequest().body("Have to input site endpoint"));  
+            } 
+        }   
+        else {
+            userBalance = user.balance;
+        }
     }
 
+    
     Ok(HttpResponse::Ok().body("agent data"))
 } 
 

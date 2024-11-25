@@ -1,13 +1,13 @@
 use actix_web::{web, HttpResponse, Responder};  
 use crate::models::agent::Agent; // Assuming Agent is a model in models/agent.rs  
 
-use crate::defines::game_launch::CurrentPlayers;  
-use crate::defines::game_launch::CallList;  
-use crate::defines::game_launch::CallApply;  
-use crate::defines::game_launch::CallCancel;  
-use crate::defines::game_launch::CallHistory;  
-use crate::defines::game_launch::AgentRtp;  
-use crate::defines::game_launch::UserRtp;  
+use crate::defines::types::CurrentPlayers;  
+use crate::defines::types::CallList;  
+use crate::defines::types::CallApply;  
+use crate::defines::types::CallCancel;  
+use crate::defines::types::CallHistory;  
+use crate::defines::types::AgentRtp;  
+use crate::defines::types::UserRtp;  
 
 pub async fn current_players(body: web::Json<CurrentPlayers>) -> HttpResponse {  
     HttpResponse::Ok().body("agent data")

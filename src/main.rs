@@ -1,7 +1,6 @@
 // src/main.rs  
 use actix_web::{App, HttpServer};  
 use sqlx::PgPool;  
-use std::io;  
 use dotenv::dotenv;  
 
 mod controllers;  

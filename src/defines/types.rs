@@ -300,3 +300,21 @@ pub struct UserRtp {
     #[validate(range(min = 20, max = 95))]  
     pub player_rtp: f64,  
 }  
+
+#[derive(Serialize, Deserialize)]  
+pub struct RequestBody {  
+    pub agent_code: String,  
+    pub agent_secret: String,  
+    pub agent_type: String,  
+    pub user_code: String,  
+    pub  provider_code: String,  
+    pub game_code: String,  
+    pub type_: String, // `type` is a reserved keyword in Rust  
+    pub txn_id: String,  
+    pub agent_before_balance: f64,  
+    pub agent_after_balance: f64,  
+    pub user_before_balance: f64,  
+    pub user_after_balance: f64,  
+    pub amount: f64,  
+    pub msg: String,  
+}  

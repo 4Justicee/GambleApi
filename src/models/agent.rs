@@ -8,7 +8,7 @@ pub struct Agent {
     pub agent_code: String,  
     pub agent_name: String,  
     pub password: String,  
-    pub api_type: i32,  
+    pub api_type: i8,  
     pub agent_type: i32,  
     pub rtp: i32,  
     pub balance: f64,  
