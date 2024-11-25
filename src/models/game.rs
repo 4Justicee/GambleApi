@@ -1,7 +1,6 @@
 use serde::{Serialize, Deserialize};  
-use chrono::Utc;
-use chrono::DateTime;
-#[derive(Serialize, Deserialize)]  
+use sqlx::FromRow;  
+#[derive(Serialize, Deserialize, Debug, FromRow)]  
 
 pub struct Game {  
     pub id: i32,  
@@ -11,6 +10,4 @@ pub struct Game {
     pub game_code: String,  
     pub banner: Option<String>, // Assuming banner is nullable because no allowNull set to false or defaultValue.  
     pub status: i32,  // Default value in SQLx is handled differently, typically set in the SQL schema.  
-    pub created_at: Option<DateTime<Utc>>,  
-    pub updated_at: Option<DateTime<Utc>>,  
 }  

@@ -7,7 +7,7 @@ pub struct User {
     pub id: i32,  
     pub agent_code: String,  
     pub user_code: String,  
-    pub target_rtp: i32,  
+    pub target_rtp: f64,  
     pub real_rtp: f64, // f64 used to represent Sequelize's DOUBLE  
     pub balance: f64,  
     pub status: i32, // With comments noted, such as "1: OK, 2: Delete"  

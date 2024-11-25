@@ -18,7 +18,7 @@ pub struct GameLaunch {
     #[validate(length(min = 1))]  
     pub provider_code: String,  
 
-    pub game_code: Option<String>,  
+    pub game_code: String,  
 
     #[validate(length(min = 1))]  
     pub lang: String,  
@@ -317,4 +317,41 @@ pub struct RequestBody {
     pub user_after_balance: f64,  
     pub amount: f64,  
     pub msg: String,  
+}  
+
+#[derive(Serialize)]  
+pub struct GameServerRequestData {  
+    pub agent_code: String,  
+    pub user_code: String,  
+    pub currency: String,  
+    pub game_code: String,  
+    pub balance: f64,  
+    pub rtp: f64,  // Assuming RTP might be optional  
+    pub lang: String,  
+    pub jackpot_come: i32,  
+    pub site_end_point: String,  
+    pub is_test: bool,  
+}  
+
+#[derive(Deserialize)]  
+pub struct GameServerResponse {  
+    pub status: i32,  
+    pub url: Option<String>,  
+    pub msg: Option<String>,  
+}  
+
+#[derive(Default, Serialize, Deserialize)]  
+pub struct GameLaunchResult {  
+    pub status: i32,  
+    pub msg: String,  
+    pub launch_url: Option<String>,  
+    pub master_code: String,  
+    pub master_balance: f64,  
+    pub master_type: String,  
+    pub player_code: String,  
+    pub player_balance: f64,  
+    pub player_created: bool, 
+    pub player_deposit: bool,  // This might need handling based on the context  
+    pub currency: String,  
+    pub lang: String,  
 }  

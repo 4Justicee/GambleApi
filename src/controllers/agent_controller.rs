@@ -2,6 +2,9 @@ use actix_web::{web, error, HttpResponse};
 use crate::models::agent::Agent; // Assuming Agent is a model in models/agent.rs  
 use crate::models::provider::Provider; // Assuming Agent is a model in models/agent.rs  
 use crate::models::user::User; // Assuming Agent is a model in models/agent.rs  
+use crate::models::agent_block::AgentBlock; // Assuming Agent is a model in models/agent.rs  
+use crate::models::game::Game; // Assuming Agent is a model in models/agent.rs  
+
 use crate::defines::types::GameLaunch;  
 use crate::defines::types::UserCreate;  
 use crate::defines::types::UserDeposit;  
@@ -14,6 +17,9 @@ use crate::defines::types::GetDateLog;
 use crate::defines::types::GetIdLog;  
 use crate::defines::types::GetExchangeHistory;  
 use crate::defines::types::RequestBody;  
+use crate::defines::types::GameServerRequestData ;  
+use crate::defines::types::GameServerResponse ;  
+use crate::defines::types::GameLaunchResult ;  
 
 use serde_json::json;  
 use sqlx::{PgPool};  
@@ -37,6 +43,8 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     let provider_code = body.provider_code.as_str();
     let agent_code = body.master_code.as_str();
     let user_code = body.player_code.as_str();
+    let game_code = body.game_code.as_str();
+    let lang = body.game_code.as_str();
     let player_balance = &body.player_balance;
 
     let agent_result = sqlx::query_as::<_, Agent>(  
@@ -53,17 +61,31 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     };  
 
     let provider = if game_type == "sports" {  
-        sqlx::query_as::<_, Provider>("SELECT * FROM providers WHERE provider_type = $1")  
+        sqlx::query_as::<_, Provider>(  
+            "SELECT * FROM providers WHERE provider_type = $1")  
             .bind("sports")  
-            .fetch_one(pool.get_ref())  
+            .fetch_optional(pool.get_ref())  
             .await  
+            .map_err(actix_web::error::ErrorInternalServerError)?  
     } else {  
-        sqlx::query_as::<_, Provider>("SELECT * FROM providers WHERE code = $1")  
+        sqlx::query_as::<_, Provider>(  
+            "SELECT * FROM providers WHERE code = $1")  
             .bind(provider_code)  
-            .fetch_one(pool.get_ref())  
+            .fetch_optional(pool.get_ref())  
             .await  
+            .map_err(actix_web::error::ErrorInternalServerError)?  
     };  
 
+    let game: Option<Game> = sqlx::query_as::<_, Game>(  
+        "SELECT status FROM games WHERE provider_code = $1 AND game_code = $2")  
+        .bind(provider_code)  
+        .bind(game_code)  
+        .fetch_optional(pool.get_ref())  
+        .await  
+        .map_err(|e| {  
+            actix_web::error::ErrorInternalServerError(e)  
+        })?;
+        
     let user_result = query_as::<_, User>(  
         "SELECT * FROM users WHERE user_code = $1 AND agent_code = $2"  
     )  
@@ -75,6 +97,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     let mut user_created = false;  
     let mut userBalance: f64 = 0.0;
     let mut userApiType = 1;
+    let mut user_deposited = false;
 
     let user = match user_result {  
         Ok(Some(user)) => user,  
@@ -109,11 +132,11 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
                 .bind(new_user.total_play_count)  
                 .execute(pool.as_ref())  
                 .await;  
-
+            user_created = true;
             match insert_result {  
                 Ok(_) => new_user,  
                 Err(e) => return Err(sqlx_error_to_actix_error(e)),  
-            }  
+            }
         },  
         Err(e) => return Err(sqlx_error_to_actix_error(e)),  
     };  
@@ -141,6 +164,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
         if let Some(amount) = body.deposit_amount {  
             let agentPrevBalance = agent.balance;
             let userPrevBalance = user.balance;
+            user_deposited = true;
 
             let mut tx = pool.begin().await.map_err(|e| {  
                 actix_web::error::ErrorInternalServerError(e)  
@@ -269,8 +293,107 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
         }
     }
 
+    let mut conn = pool.acquire().await.map_err(|e| {  
+        actix_web::error::ErrorInternalServerError(e)  
+    })?;
+    let possible_blocks: Option<AgentBlock> = sqlx::query_as::<_, AgentBlock>(  
+        "SELECT block_provider_code, block_game_code FROM agent_blocks WHERE agent_code = $1")  
+        .bind(agent_code)  
+        .fetch_optional(&mut *conn)  
+        .await  
+        .map_err(|e| {  
+            actix_web::error::ErrorInternalServerError(e)  
+        })?;
+
+    if let Some(agent_blocks) = possible_blocks {  
+        let exist_block_providers: Vec<&str> = agent_blocks.block_provider_code.split(",").collect();  
+        let exist_block_games: Vec<&str> = agent_blocks.block_game_code.split(",").collect();  
+
+        if exist_block_providers.contains(&body.provider_code.as_str()) {  
+            return Ok(HttpResponse::BadRequest().json("Provider is currently under maintenance (Agent set Provider Status 0)"));  
+        }  
+
+        let check_block_game = format!("{}/{}", body.provider_code, body.game_code);  
+        if exist_block_games.contains(&check_block_game.as_str()) {  
+            return Ok(HttpResponse::BadRequest().json("Game is currently under maintenance (Agent set Game Status 0)"));  
+        }  
+    }  
     
-    Ok(HttpResponse::Ok().body("agent data"))
+    let game: Option<Game> = sqlx::query_as::<_, Game>(  
+        "SELECT status FROM games WHERE provider_code = $1 AND game_code = $2")  
+        .bind(provider_code)  
+        .bind(game_code)  
+        .fetch_optional(pool.get_ref())  
+        .await  
+        .map_err(|e| {  
+            actix_web::error::ErrorInternalServerError(e)  
+        })?;
+    
+    if let Some(game) = game {  
+        if game.status == 0 && game_type != "sports" {  
+            return Ok(HttpResponse::Ok().json(json!({  
+                "status": 0,  
+                "msg": "Game is currently under maintenance. (GameServer set Game Status 0)"  
+            })));  
+        }  
+
+    }
+    let client = Client::new();  
+    let req_data = GameServerRequestData {  
+        agent_code: "gambleApi".to_string(),  
+        user_code: format!("agent-{}**user-{}", agent.agent_code, user.user_code),  
+        currency: agent.currency.clone(),  
+        game_code: game_code.to_string(),  // Assuming game_code is part of `user`  
+        balance: user.balance,  
+        rtp: user.target_rtp,  
+        lang: lang.to_string(),  
+        jackpot_come: agent.jackpot_come,  
+        site_end_point: agent.site_end_point.clone(),  
+        is_test: false,  
+    };  
+
+    let endpoint = match provider {  
+        Some(p) => p.endpoint,  
+        None => return Err(actix_web::error::ErrorNotFound("Provider not found")),  
+    };  
+
+    // Now continue using `endpoint` as it's guaranteed to have a value  
+    let client = Client::new();  
+    let game_server_response: GameServerResponse = client  
+        .post(format!("{}/api/gameurl", endpoint))  
+        .json(&req_data)  
+        .send()  
+        .await  
+        .map_err(actix_web::error::ErrorInternalServerError)?  
+        .json()  
+        .await  
+        .map_err(actix_web::error::ErrorInternalServerError)?;  
+
+    if game_server_response.status == 1 {  
+        let result = GameLaunchResult {  
+            status: 1,  
+            msg: "Success".to_string(),  
+            launch_url: game_server_response.url,  
+            master_code: agent.agent_code.clone(),  
+            master_balance: agent.balance,  
+            master_type: if agent.api_type == 0 { "Seamless".to_string() } else { "Transfer".to_string() },  
+            player_code: user.user_code.clone(),  
+            player_balance: user.balance,  
+            player_created: user_created, // Adjust based on real field  
+            player_deposit: user_deposited, // Adjust based on context  
+            currency: agent.currency.clone(),  
+            lang: lang.to_string(), // Adjust language handling  
+        };  
+
+        return Ok(HttpResponse::Ok().json(result))  
+    } else {  
+        return Ok(HttpResponse::BadRequest().json(GameLaunchResult {  
+            status: 0,  
+            msg: format!("{} : {:?}", "Internal Error", game_server_response.msg),  
+            ..Default::default() // Using default for other fields initially seraialized  
+        }))  
+    }  
+
 } 
 
 pub async fn user_create(body: web::Json<UserCreate>) -> HttpResponse {  
