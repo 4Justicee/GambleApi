@@ -39,6 +39,7 @@ fn sqlx_error_to_actix_error(e: sqlx::Error) -> actix_web::Error {
 }  
 
 pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -> Result<HttpResponse, actix_web::Error> {                   
+    println!("Hello, world! game_launch");
     let game_type = body.game_type.as_str();
     let provider_code = body.provider_code.as_str();
     let agent_code = body.master_code.as_str();
@@ -48,9 +49,9 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
     let player_balance = &body.player_balance;
 
     let agent_result = sqlx::query_as::<_, Agent>(  
-        "SELECT * FROM agents WHERE agent_code = 1"  
+        "SELECT * FROM agents WHERE agent_code = $1"  
     )  
-    .bind(&body.master_code)  
+    .bind(agent_code)  
     .fetch_optional(pool.as_ref())  
     .await;  
 
@@ -396,7 +397,7 @@ pub async fn game_launch(pool: web::Data<PgPool>, body: web::Json<GameLaunch>) -
 
 } 
 
-pub async fn user_create(body: web::Json<UserCreate>) -> HttpResponse {  
+pub async fn user_create(body: web::Json<GameLaunch>) -> HttpResponse {  
     HttpResponse::Ok().body("agent data")
 }
 

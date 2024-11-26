@@ -1,7 +1,9 @@
 // src/main.rs  
-use actix_web::{App, HttpServer};  
+use actix_web::{web, App, HttpServer,HttpResponse, Responder};  
 use sqlx::PgPool;  
 use dotenv::dotenv;  
+use actix_web::web::Data;  
+use env_logger; 
 
 mod controllers;  
 mod models;  
@@ -45,8 +47,15 @@ pub async fn setup_database(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())  
 }  
 
+async fn greet() -> impl Responder {  
+    HttpResponse::Ok().body("Hello, world!")  
+} 
+
 #[actix_web::main]  
 async fn main() -> std::io::Result<()> {  
+    std::env::set_var("RUST_LOG", "debug");  
+    env_logger::init();  
+
     dotenv().ok(); // Load .env file if exists  
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"); 
 
@@ -58,8 +67,9 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {  
         App::new()  
+        .app_data(Data::new(pool.clone())) // IMPORTANT: attach the pool to the app  
         .configure(routes::game::config)  
-        .configure(routes::agent::config) 
+        .configure(routes::agent::config)        
     })  
     .bind("127.0.0.1:8080")?  
     .run()  
